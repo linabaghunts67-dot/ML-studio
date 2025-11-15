@@ -73,6 +73,7 @@ Unlike a single ML script, this project is designed as a **full platform**:
 
 # Project Structure
 
+```
 tabularml-studio/
 ├─ app/
 │ ├─ main_app.py
@@ -94,8 +95,7 @@ tabularml-studio/
 ├─ .gitignore
 ├─ README.md
 ├─ requirements.txt
-
-
+```
 
 ---
 

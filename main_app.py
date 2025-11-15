@@ -1,0 +1,241 @@
+import os
+import sys
+
+import pandas as pd
+import streamlit as st
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from src.data_loader import get_scenario_config, load_data
+from src.data_prep import basic_clean
+from src.evaluation import train_and_evaluate_models
+
+st.set_page_config(
+    page_title="TabularML Studio",
+    layout="wide",
+)
+
+SCENARIOS = {
+    "Price Prediction (Phones)": "price",
+    "Credit Default Risk": "default",
+    "Customer Churn": "churn",
+}
+
+if "df_clean" not in st.session_state:
+    st.session_state.df_clean = None
+
+if "last_metrics" not in st.session_state:
+    st.session_state.last_metrics = None
+
+if "last_test_df" not in st.session_state:
+    st.session_state.last_test_df = None
+
+
+def main():
+    st.sidebar.title("TabularML Studio")
+    st.sidebar.markdown("Choose a scenario to start:")
+
+    scenario_label = st.sidebar.radio(
+        "Scenario",
+        list(SCENARIOS.keys()),
+        index=0,
+    )
+    scenario_id = SCENARIOS[scenario_label]
+    cfg = get_scenario_config(scenario_id)
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"Current scenario: `{cfg.id}`")
+    st.sidebar.markdown(f"Task type: `{cfg.task_type}`")
+    st.sidebar.markdown(f"Target column: `{cfg.target}`")
+
+    df_raw = load_data(scenario_id)
+
+    st.title("TabularML Studio 🧠📊")
+    st.subheader("Interactive data cleaning and modeling playground")
+    st.markdown(
+        f"### Scenario: {cfg.name}\n"
+        "Steps: **Overview → Clean → Explore → Model → Download**."
+    )
+
+    tab_overview, tab_clean, tab_explore, tab_model, tab_download = st.tabs(
+        ["1. Data overview", "2. Clean & fill", "3. Explore", "4. Train models", "5. Download"]
+    )
+
+    with tab_overview:
+        st.header("1. Data overview")
+        st.markdown("Raw dataset preview")
+        st.dataframe(df_raw.head())
+
+        st.markdown("Basic info")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Rows", len(df_raw))
+        with col2:
+            st.metric("Columns", df_raw.shape[1])
+        with col3:
+            st.metric("Missing values (total)", int(df_raw.isna().sum().sum()))
+
+        st.markdown("Missing values per column")
+        st.write(df_raw.isna().sum())
+
+        st.markdown("Descriptive statistics (numeric)")
+        st.write(df_raw.select_dtypes(include="number").describe())
+
+    with tab_clean:
+        st.header("2. Clean & fill the data")
+
+        st.markdown(
+            "Configure how to handle missing values and outliers. "
+            "This creates a clean version of the dataset for export and modeling."
+        )
+
+        st.subheader("Missing values")
+
+        numeric_strategy = st.selectbox(
+            "Numeric missing value strategy",
+            ["mean", "median", "drop rows with NaNs"],
+            index=0,
+        )
+        categorical_strategy = st.selectbox(
+            "Categorical missing value strategy",
+            ["most_frequent", "create 'Unknown' category"],
+            index=0,
+        )
+
+        st.subheader("Outliers")
+        cap_outliers = st.checkbox("Cap numeric outliers at 1st and 99th percentile", value=False)
+
+        if st.button("Apply cleaning"):
+            df_clean = basic_clean(
+                df_raw,
+                target_col=cfg.target,
+                numeric_strategy=numeric_strategy,
+                categorical_strategy=categorical_strategy,
+                cap_outliers=cap_outliers,
+            )
+            st.session_state.df_clean = df_clean
+            st.success("Cleaning applied. Cleaned dataset stored in session state.")
+            st.markdown("Preview of cleaned data")
+            st.dataframe(df_clean.head())
+
+            before_missing = df_raw.isna().sum().sum()
+            after_missing = df_clean.isna().sum().sum()
+            st.markdown(f"- Missing values before: **{before_missing}**")
+            st.markdown(f"- Missing values after: **{after_missing}**")
+
+    df_for_analysis = (
+        st.session_state.df_clean if st.session_state.df_clean is not None else df_raw
+    )
+
+    with tab_explore:
+        st.header("3. Explore & visualize")
+
+        st.markdown("Pick a feature to inspect its distribution and relation to the target.")
+
+        feature_cols = [c for c in df_for_analysis.columns if c != cfg.target]
+        if feature_cols:
+            feature = st.selectbox("Select a feature", feature_cols)
+            if feature:
+                col_left, col_right = st.columns(2)
+                with col_left:
+                    st.markdown(f"Distribution of `{feature}`")
+                    if df_for_analysis[feature].dtype == "O":
+                        st.bar_chart(df_for_analysis[feature].value_counts())
+                    else:
+                        st.histogram(df_for_analysis[feature])
+                with col_right:
+                    st.markdown(f"Feature vs target `{cfg.target}`")
+                    try:
+                        st.scatter_chart(
+                            df_for_analysis[[feature, cfg.target]].dropna(),
+                            x=feature,
+                            y=cfg.target,
+                        )
+                    except Exception:
+                        st.write("Cannot plot scatter for this feature/target combination.")
+        else:
+            st.warning("No feature columns available.")
+
+    with tab_model:
+        st.header("4. Train and evaluate models")
+
+        st.markdown("Choose one or more models to train on the dataset.")
+
+        selected_model_names = []
+        if cfg.task_type == "regression":
+            st.markdown("Regression models")
+            use_linear = st.checkbox("Linear Regression", value=True)
+            use_rf = st.checkbox("Random Forest Regressor", value=False)
+            if use_linear:
+                selected_model_names.append("linear")
+            if use_rf:
+                selected_model_names.append("rf")
+        else:
+            st.markdown("Classification models")
+            use_log_reg = st.checkbox("Logistic Regression", value=True)
+            use_rf_clf = st.checkbox("Random Forest Classifier", value=False)
+            if use_log_reg:
+                selected_model_names.append("log_reg")
+            if use_rf_clf:
+                selected_model_names.append("rf")
+
+        n_estimators = st.slider(
+            "Number of trees for Random Forest (if used)", min_value=10, max_value=300, value=100, step=10
+        )
+
+        if st.button("Train & evaluate"):
+            if not selected_model_names:
+                st.error("Please select at least one model.")
+            else:
+                with st.spinner("Training models..."):
+                    metrics_df, fitted_models, test_df = train_and_evaluate_models(
+                        df_for_analysis,
+                        target_col=cfg.target,
+                        task_type=cfg.task_type,
+                        model_names=selected_model_names,
+                        n_estimators=n_estimators,
+                    )
+                    st.session_state.last_metrics = metrics_df
+                    st.session_state.last_test_df = test_df
+
+                st.success("Training complete.")
+                st.markdown("Evaluation metrics")
+                st.dataframe(metrics_df)
+
+    with tab_download:
+        st.header("5. Download results")
+
+        st.markdown(
+            "You can download:\n"
+            "- The cleaned dataset (if cleaning was applied)\n"
+            "- The test set with predictions from the last training run\n"
+        )
+
+        if st.session_state.df_clean is not None:
+            clean_csv = st.session_state.df_clean.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download cleaned data (CSV)",
+                data=clean_csv,
+                file_name=f"{cfg.id}_cleaned.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No cleaned data available yet. Apply cleaning in tab 2.")
+
+        if st.session_state.last_test_df is not None:
+            pred_csv = st.session_state.last_test_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download test set with predictions (CSV)",
+                data=pred_csv,
+                file_name=f"{cfg.id}_test_with_predictions.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No model has been trained yet. Train a model in tab 4.")
+
+
+if __name__ == "__main__":
+    main()

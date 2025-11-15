@@ -29,7 +29,7 @@ def basic_clean(
             elif numeric_strategy == "median":
                 fill_vals = df[numeric_cols].median()
             else:
-                raise Valuerror("Unknown numeric strategy")
+                raise ValueError("Unknown numeric strategy")
             df[numeric_cols] = df[numeric_cols].fillna(fill_vals)
 
     if categorical_cols:
@@ -41,7 +41,7 @@ def basic_clean(
             raise ValueError("Unknown categorical strategy")
         df[categorical_cols] = df[categorical_cols].fillna(fill_vals)
 
-    if cap_outliers:
+    if cap_outliers and numeric_cols:
         for col in numeric_cols:
             lower = np.percentile(df[col], 1)
             upper = np.percentile(df[col], 99)

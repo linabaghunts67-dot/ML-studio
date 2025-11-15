@@ -145,7 +145,7 @@ def main():
                     if df_for_analysis[feature].dtype == "O":
                         st.bar_chart(df_for_analysis[feature].value_counts())
                     else:
-                        st.histogram(df_for_analysis[feature])
+                         st.bar_chart(df_for_analysis[feature])
                 with col_right:
                     st.markdown(f"Feature vs target `{cfg.target}`")
                     try:
@@ -239,3 +239,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

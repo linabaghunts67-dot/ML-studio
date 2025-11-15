@@ -3,6 +3,8 @@ import sys
 
 import pandas as pd
 import streamlit as st
+import plotly.express as px
+import matplotlib.pyplot as plt
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
@@ -69,7 +71,6 @@ def main():
         st.markdown("Raw dataset preview")
         st.dataframe(df_raw.head())
 
-        st.markdown("Basic info")
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Rows", len(df_raw))
@@ -78,21 +79,11 @@ def main():
         with col3:
             st.metric("Missing values (total)", int(df_raw.isna().sum().sum()))
 
-        st.markdown("Missing values per column")
         st.write(df_raw.isna().sum())
-
-        st.markdown("Descriptive statistics (numeric)")
         st.write(df_raw.select_dtypes(include="number").describe())
 
     with tab_clean:
         st.header("2. Clean & fill the data")
-
-        st.markdown(
-            "Configure how to handle missing values and outliers. "
-            "This creates a clean version of the dataset for export and modeling."
-        )
-
-        st.subheader("Missing values")
 
         numeric_strategy = st.selectbox(
             "Numeric missing value strategy",
@@ -105,7 +96,6 @@ def main():
             index=0,
         )
 
-        st.subheader("Outliers")
         cap_outliers = st.checkbox("Cap numeric outliers at 1st and 99th percentile", value=False)
 
         if st.button("Apply cleaning"):
@@ -117,8 +107,6 @@ def main():
                 cap_outliers=cap_outliers,
             )
             st.session_state.df_clean = df_clean
-            st.success("Cleaning applied. Cleaned dataset stored in session state.")
-            st.markdown("Preview of cleaned data")
             st.dataframe(df_clean.head())
 
             before_missing = df_raw.isna().sum().sum()
@@ -133,27 +121,37 @@ def main():
     with tab_explore:
         st.header("3. Explore & visualize")
 
-        st.markdown("Pick a feature to inspect its distribution and relation to the target.")
-
         feature_cols = [c for c in df_for_analysis.columns if c != cfg.target]
         if feature_cols:
             feature = st.selectbox("Select a feature", feature_cols)
             if feature:
                 col_left, col_right = st.columns(2)
+
                 with col_left:
-                    st.markdown(f"Distribution of `{feature}`")
                     if df_for_analysis[feature].dtype == "O":
-                        st.bar_chart(df_for_analysis[feature].value_counts())
+                        fig = px.bar(
+                            df_for_analysis[feature].value_counts().reset_index(),
+                            x="index",
+                            y=feature,
+                            labels={"index": feature, feature: "Count"},
+                        )
+                        st.plotly_chart(fig)
                     else:
-                         st.bar_chart(df_for_analysis[feature])
+                        fig = px.histogram(
+                            df_for_analysis,
+                            x=feature,
+                            nbins=40,
+                        )
+                        st.plotly_chart(fig)
+
                 with col_right:
-                    st.markdown(f"Feature vs target `{cfg.target}`")
                     try:
-                        st.scatter_chart(
-                            df_for_analysis[[feature, cfg.target]].dropna(),
+                        fig2 = px.scatter(
+                            df_for_analysis,
                             x=feature,
                             y=cfg.target,
                         )
+                        st.plotly_chart(fig2)
                     except Exception:
                         st.write("Cannot plot scatter for this feature/target combination.")
         else:
@@ -162,11 +160,8 @@ def main():
     with tab_model:
         st.header("4. Train and evaluate models")
 
-        st.markdown("Choose one or more models to train on the dataset.")
-
         selected_model_names = []
         if cfg.task_type == "regression":
-            st.markdown("Regression models")
             use_linear = st.checkbox("Linear Regression", value=True)
             use_rf = st.checkbox("Random Forest Regressor", value=False)
             if use_linear:
@@ -174,7 +169,6 @@ def main():
             if use_rf:
                 selected_model_names.append("rf")
         else:
-            st.markdown("Classification models")
             use_log_reg = st.checkbox("Logistic Regression", value=True)
             use_rf_clf = st.checkbox("Random Forest Classifier", value=False)
             if use_log_reg:
@@ -187,32 +181,23 @@ def main():
         )
 
         if st.button("Train & evaluate"):
-            if not selected_model_names:
-                st.error("Please select at least one model.")
-            else:
-                with st.spinner("Training models..."):
-                    metrics_df, fitted_models, test_df = train_and_evaluate_models(
-                        df_for_analysis,
-                        target_col=cfg.target,
-                        task_type=cfg.task_type,
-                        model_names=selected_model_names,
-                        n_estimators=n_estimators,
-                    )
-                    st.session_state.last_metrics = metrics_df
-                    st.session_state.last_test_df = test_df
+            if selected_model_names:
+                metrics_df, fitted_models, test_df = train_and_evaluate_models(
+                    df_for_analysis,
+                    target_col=cfg.target,
+                    task_type=cfg.task_type,
+                    model_names=selected_model_names,
+                    n_estimators=n_estimators,
+                )
+                st.session_state.last_metrics = metrics_df
+                st.session_state.last_test_df = test_df
 
-                st.success("Training complete.")
-                st.markdown("Evaluation metrics")
                 st.dataframe(metrics_df)
+            else:
+                st.error("Please select at least one model.")
 
     with tab_download:
         st.header("5. Download results")
-
-        st.markdown(
-            "You can download:\n"
-            "- The cleaned dataset (if cleaning was applied)\n"
-            "- The test set with predictions from the last training run\n"
-        )
 
         if st.session_state.df_clean is not None:
             clean_csv = st.session_state.df_clean.to_csv(index=False).encode("utf-8")
@@ -222,8 +207,6 @@ def main():
                 file_name=f"{cfg.id}_cleaned.csv",
                 mime="text/csv",
             )
-        else:
-            st.info("No cleaned data available yet. Apply cleaning in tab 2.")
 
         if st.session_state.last_test_df is not None:
             pred_csv = st.session_state.last_test_df.to_csv(index=False).encode("utf-8")
@@ -233,10 +216,7 @@ def main():
                 file_name=f"{cfg.id}_test_with_predictions.csv",
                 mime="text/csv",
             )
-        else:
-            st.info("No model has been trained yet. Train a model in tab 4.")
 
 
 if __name__ == "__main__":
     main()
-

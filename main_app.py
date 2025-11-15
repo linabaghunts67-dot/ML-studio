@@ -7,7 +7,7 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+PROJECT_ROOT = CURRENT_DIR
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -68,7 +68,6 @@ def main():
 
     with tab_overview:
         st.header("1. Data overview")
-        st.markdown("Raw dataset preview")
         st.dataframe(df_raw.head())
 
         col1, col2, col3 = st.columns(3)
@@ -122,38 +121,39 @@ def main():
         st.header("3. Explore & visualize")
 
         feature_cols = [c for c in df_for_analysis.columns if c != cfg.target]
+
         if feature_cols:
             feature = st.selectbox("Select a feature", feature_cols)
-            if feature:
-                col_left, col_right = st.columns(2)
 
-                with col_left:
-                    if df_for_analysis[feature].dtype == "O":
-                        fig = px.bar(
-                            df_for_analysis[feature].value_counts().reset_index(),
-                            x="index",
-                            y=feature,
-                            labels={"index": feature, feature: "Count"},
-                        )
-                        st.plotly_chart(fig)
-                    else:
-                        fig = px.histogram(
-                            df_for_analysis,
-                            x=feature,
-                            nbins=40,
-                        )
-                        st.plotly_chart(fig)
+            col_left, col_right = st.columns(2)
 
-                with col_right:
-                    try:
-                        fig2 = px.scatter(
-                            df_for_analysis,
-                            x=feature,
-                            y=cfg.target,
-                        )
-                        st.plotly_chart(fig2)
-                    except Exception:
-                        st.write("Cannot plot scatter for this feature/target combination.")
+            with col_left:
+                if df_for_analysis[feature].dtype == "O":
+                    fig = px.bar(
+                        df_for_analysis[feature].value_counts().reset_index(),
+                        x="index",
+                        y=feature,
+                        labels={"index": feature, feature: "Count"},
+                    )
+                    st.plotly_chart(fig)
+                else:
+                    fig = px.histogram(
+                        df_for_analysis,
+                        x=feature,
+                        nbins=40,
+                    )
+                    st.plotly_chart(fig)
+
+            with col_right:
+                try:
+                    fig2 = px.scatter(
+                        df_for_analysis,
+                        x=feature,
+                        y=cfg.target,
+                    )
+                    st.plotly_chart(fig2)
+                except Exception:
+                    st.warning("Scatter plot not available for this combination.")
         else:
             st.warning("No feature columns available.")
 
@@ -161,23 +161,20 @@ def main():
         st.header("4. Train and evaluate models")
 
         selected_model_names = []
+
         if cfg.task_type == "regression":
-            use_linear = st.checkbox("Linear Regression", value=True)
-            use_rf = st.checkbox("Random Forest Regressor", value=False)
-            if use_linear:
+            if st.checkbox("Linear Regression", value=True):
                 selected_model_names.append("linear")
-            if use_rf:
+            if st.checkbox("Random Forest Regressor", value=False):
                 selected_model_names.append("rf")
         else:
-            use_log_reg = st.checkbox("Logistic Regression", value=True)
-            use_rf_clf = st.checkbox("Random Forest Classifier", value=False)
-            if use_log_reg:
+            if st.checkbox("Logistic Regression", value=True):
                 selected_model_names.append("log_reg")
-            if use_rf_clf:
+            if st.checkbox("Random Forest Classifier", value=False):
                 selected_model_names.append("rf")
 
         n_estimators = st.slider(
-            "Number of trees for Random Forest (if used)", min_value=10, max_value=300, value=100, step=10
+            "Number of trees for Random Forest", 10, 300, 100, 10
         )
 
         if st.button("Train & evaluate"):
@@ -191,7 +188,6 @@ def main():
                 )
                 st.session_state.last_metrics = metrics_df
                 st.session_state.last_test_df = test_df
-
                 st.dataframe(metrics_df)
             else:
                 st.error("Please select at least one model.")
@@ -202,7 +198,7 @@ def main():
         if st.session_state.df_clean is not None:
             clean_csv = st.session_state.df_clean.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="Download cleaned data (CSV)",
+                "Download cleaned data (CSV)",
                 data=clean_csv,
                 file_name=f"{cfg.id}_cleaned.csv",
                 mime="text/csv",
@@ -211,7 +207,7 @@ def main():
         if st.session_state.last_test_df is not None:
             pred_csv = st.session_state.last_test_df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="Download test set with predictions (CSV)",
+                "Download test set with predictions (CSV)",
                 data=pred_csv,
                 file_name=f"{cfg.id}_test_with_predictions.csv",
                 mime="text/csv",
